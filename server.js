@@ -1,15 +1,30 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const app = express();
-const PORT = 3000;
-const SECRET_KEY = 'your-secret-key';  // Replace with a secure secret key
-const Database = require('better-sqlite3');
 const path = require('path');
-const db = new Database(path.join(__dirname, 'database_folder', 'database.db'));
+const cors = require('cors');
+const Database = require('better-sqlite3');
+const fs = require('fs');
+const app = express();
+
+const PORT = process.env.PORT || 3000;
+require('dotenv').config(); // Load environment variables
+const SECRET_KEY = process.env.SECRET_KEY; // Access the secret key
+
+
+
+// Ensure the database folder exists
+const databaseFolderPath = path.join(__dirname, 'database_folder');
+if (!fs.existsSync(databaseFolderPath)) {
+    fs.mkdirSync(databaseFolderPath);
+}
+
+// Initialize SQLite database
+const db = new Database(path.join(databaseFolderPath, 'database.db'));
 
 // Middleware
-app.use(express.json()); // Parses incoming JSON requests
+app.use(express.json());
+app.use(cors());
 
 // Create tables if they don't exist
 db.exec(`
@@ -32,7 +47,7 @@ db.exec(`
     );
 `);
 
-// Seed some sample words if they don't already exist
+// Seed some sample words
 const words = [
     { word: "apple", difficulty: "easy" },
     { word: "banana", difficulty: "easy" },
@@ -49,13 +64,11 @@ words.forEach(word => {
 // JWT authentication middleware
 const verifyToken = (req, res, next) => {
     const token = req.headers['authorization'];
-
     if (!token) {
         return res.status(403).json({ error: 'No token provided' });
     }
 
-    const bearerToken = token.split(' ')[1];  // This will get the actual token part
-
+    const bearerToken = token.split(' ')[1];
     if (!bearerToken) {
         return res.status(403).json({ error: 'Invalid token format' });
     }
@@ -64,25 +77,22 @@ const verifyToken = (req, res, next) => {
         if (err) {
             return res.status(403).json({ error: 'Failed to authenticate token' });
         }
-
         req.userId = decoded.id;
         req.username = decoded.username;
         next();
     });
 };
 
-// Root route to verify the server is running
+// Routes
 app.get('/', (req, res) => {
     res.send('Welcome to the Spelling Bee Adventure API!');
 });
 
-// API endpoint to fetch words
 app.get('/words', (req, res) => {
     const words = db.prepare('SELECT * FROM words').all();
     res.json(words);
 });
 
-// User Registration Endpoint
 app.post('/register', async (req, res) => {
     const { username, password } = req.body;
 
@@ -96,13 +106,11 @@ app.post('/register', async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-
     db.prepare('INSERT INTO users (username, password) VALUES (?, ?)').run(username, hashedPassword);
 
     res.json({ message: 'User registered successfully' });
 });
 
-// User Login Endpoint
 app.post('/login', async (req, res) => {
     const { username, password } = req.body;
 
@@ -121,11 +129,9 @@ app.post('/login', async (req, res) => {
     }
 
     const token = jwt.sign({ id: user.id, username: user.username }, SECRET_KEY, { expiresIn: '1h' });
-
     res.json({ message: 'Login successful', token });
 });
 
-// Protected route to save score
 app.post('/scores', verifyToken, (req, res) => {
     const { score } = req.body;
     const username = req.username;
@@ -138,22 +144,16 @@ app.post('/scores', verifyToken, (req, res) => {
     res.json({ message: 'Score saved successfully!' });
 });
 
-// Endpoint to get all scores
 app.get('/scores', (req, res) => {
     const scores = db.prepare('SELECT * FROM scores ORDER BY score DESC').all();
     res.json(scores);
 });
 
-// Global error handler
+// Error handler
 app.use((err, req, res, next) => {
     console.error(err.stack);
     res.status(500).send('Something went wrong!');
 });
 
-// Start the server
-app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-});
-
-
-
+// Export for Vercel
+module.exports = app;
